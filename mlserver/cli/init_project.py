@@ -5,8 +5,8 @@ from ..logging import logger
 def init_cookiecutter_project(template: str):
     rc = subprocess.call(["which", "cookiecutter"])
     if rc == 0:
-        cmd = f"cookiecutter {template}"
-        subprocess.run(cmd, check=True, shell=True)
+        cmd = ["cookiecutter", template]
+        subprocess.run(cmd, check=True, shell=False)
     else:
         logger.error(
             "The cookiecutter command is not found. \n\n"

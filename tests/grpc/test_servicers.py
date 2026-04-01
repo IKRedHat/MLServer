@@ -18,28 +18,28 @@ from mlserver.types import Datatype
 from mlserver import __version__
 
 
-async def test_server_live(inference_service_stub):
+async def test_server_live(inference_service_stub) -> None:
     req = pb.ServerLiveRequest()
     response = await inference_service_stub.ServerLive(req)
 
     assert response.live
 
 
-async def test_server_ready(inference_service_stub):
+async def test_server_ready(inference_service_stub) -> None:
     req = pb.ServerReadyRequest()
     response = await inference_service_stub.ServerReady(req)
 
     assert response.ready
 
 
-async def test_model_ready(inference_service_stub, sum_model):
+async def test_model_ready(inference_service_stub, sum_model) -> None:
     req = pb.ModelReadyRequest(name=sum_model.name, version=sum_model.version)
     response = await inference_service_stub.ModelReady(req)
 
     assert response.ready
 
 
-async def test_server_metadata(inference_service_stub):
+async def test_server_metadata(inference_service_stub) -> None:
     req = pb.ServerMetadataRequest()
     response = await inference_service_stub.ServerMetadata(req)
 
@@ -48,7 +48,7 @@ async def test_server_metadata(inference_service_stub):
     assert response.extensions == []
 
 
-async def test_model_metadata(inference_service_stub, sum_model_settings):
+async def test_model_metadata(inference_service_stub, sum_model_settings) -> None:
     req = pb.ModelMetadataRequest(
         name=sum_model_settings.name, version=sum_model_settings.parameters.version
     )
@@ -67,7 +67,7 @@ async def test_model_infer(
     model_infer_request,
     model_name,
     model_version,
-):
+) -> None:
     model_infer_request.model_name = model_name
     if model_version is not None:
         model_infer_request.model_version = model_version
@@ -95,7 +95,7 @@ async def test_model_stream_infer(
     model_generate_request,
     model_name,
     model_version,
-):
+) -> None:
     model_generate_request.model_name = model_name
     if model_version is not None:
         model_generate_request.model_version = model_version
@@ -117,7 +117,7 @@ async def test_model_stream_infer(
         assert prediction.outputs[0].contents == expected
 
 
-async def test_model_infer_raw_contents(inference_service_stub, model_infer_request):
+async def test_model_infer_raw_contents(inference_service_stub, model_infer_request) -> None:
     # Prepare request with raw contents
     for input_tensor in model_infer_request.inputs:
         request_input = InferInputTensorConverter.to_types(input_tensor)
@@ -148,7 +148,7 @@ async def test_model_infer_headers(
     inference_service_stub,
     model_infer_request,
     sum_model_settings,
-):
+) -> None:
     model_infer_request.model_name = sum_model_settings.name
     model_infer_request.ClearField("model_version")
 
@@ -169,7 +169,7 @@ async def test_model_infer_headers(
         assert trailing_metadata[key] == value
 
 
-async def test_model_infer_error(inference_service_stub, model_infer_request):
+async def test_model_infer_error(inference_service_stub, model_infer_request) -> None:
     with pytest.raises(grpc.RpcError) as err:
         model_infer_request.model_name = "my-model"
         await inference_service_stub.ModelInfer(model_infer_request)
@@ -183,7 +183,7 @@ async def test_model_infer_error(inference_service_stub, model_infer_request):
     "sum_model_settings", [lazy_fixture("text_stream_model_settings")]
 )
 @pytest.mark.parametrize("sum_model", [lazy_fixture("text_stream_model")])
-async def test_model_stream_infer_error(inference_service_stub, model_generate_request):
+async def test_model_stream_infer_error(inference_service_stub, model_generate_request) -> None:
     async def get_stream_request(request):
         yield request
 
@@ -201,13 +201,13 @@ async def test_model_stream_infer_error(inference_service_stub, model_generate_r
 async def test_model_repository_index(
     inference_service_stub,
     grpc_repository_index_request,
-):
+) -> None:
     index = await inference_service_stub.RepositoryIndex(grpc_repository_index_request)
 
     assert len(index.models) == 1
 
 
-async def test_model_repository_unload(inference_service_stub, sum_model_settings):
+async def test_model_repository_unload(inference_service_stub, sum_model_settings) -> None:
     unload_request = pb.RepositoryModelUnloadRequest(model_name=sum_model_settings.name)
     await inference_service_stub.RepositoryModelUnload(unload_request)
 
@@ -220,7 +220,7 @@ async def test_model_repository_unload(inference_service_stub, sum_model_setting
 async def test_model_repository_load(
     inference_service_stub,
     sum_model_settings,
-):
+) -> None:
     await inference_service_stub.RepositoryModelUnload(
         pb.RepositoryModelLoadRequest(model_name=sum_model_settings.name)
     )
@@ -234,7 +234,7 @@ async def test_model_repository_load(
     assert response.name == sum_model_settings.name
 
 
-async def test_model_repository_load_error(inference_service_stub, sum_model_settings):
+async def test_model_repository_load_error(inference_service_stub, sum_model_settings) -> None:
     with pytest.raises(grpc.RpcError) as err:
         load_request = pb.RepositoryModelLoadRequest(model_name="my-model")
         await inference_service_stub.RepositoryModelLoad(load_request)
@@ -246,7 +246,7 @@ async def test_model_repository_load_error(inference_service_stub, sum_model_set
 async def test_infer_invalid_datatype_error(
     inference_service_stub,
     model_infer_request_invalid_datatype,
-):
+) -> None:
     model_infer_request_invalid_datatype.model_name = "sum-model"
     model_infer_request_invalid_datatype.ClearField("model_version")
 

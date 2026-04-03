@@ -96,8 +96,8 @@ def test_model_settings_serialisation():
     # [3]  https://docs.pydantic.dev/latest/api/base_model/#pydantic.BaseModel.model_dump_json  # noqa: E501
 
     as_dict = model_settings.model_dump(by_alias=True)
-    as_dict["implementation"] == expected
+    assert as_dict["implementation"] == expected
 
     as_json = model_settings.model_dump_json(by_alias=True)
     as_dict = json.loads(as_json)
-    as_dict["implementation"] == expected
+    assert as_dict["implementation"] == expected

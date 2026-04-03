@@ -48,11 +48,11 @@ def build_image(
         dockerfile_path = write_dockerfile(tmp_dir, dockerfile)
         _docker_command_suffix = f"{folder} -f {dockerfile_path} -t {image_tag}"
         if no_cache:
-            build_cmd = _docker_command_prefix + "--no-cache " + _docker_command_suffix
+            build_cmd = [_docker_command_prefix.split()[0], *_docker_command_prefix.split()[1:], "--no-cache", folder, "-f", dockerfile_path, "-t", image_tag]
         else:
-            build_cmd = _docker_command_prefix + _docker_command_suffix
+            build_cmd = [_docker_command_prefix.split()[0], *_docker_command_prefix.split()[1:], folder, "-f", dockerfile_path, "-t", image_tag]
         build_env = os.environ.copy()
         build_env["DOCKER_BUILDKIT"] = "1"
-        subprocess.run(build_cmd, check=True, shell=True, env=build_env)
+        subprocess.run(build_cmd, check=True, shell=False, env=build_env)
 
     return image_tag

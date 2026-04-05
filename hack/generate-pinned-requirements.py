@@ -41,8 +41,11 @@ DEFAULT_PLATFORMS = [
     ["manylinux2014_x86_64", "manylinux_2_34_x86_64", "linux_x86_64"],
     ["manylinux2014_aarch64", "manylinux_2_34_aarch64", "linux_aarch64"],
 ]
+"""Default platform tags for x86_64 and aarch64."""
 
 CONFIG_FILENAME = "requirements-config.json"
+"""Name of the configuration file."""
+
 SENSITIVE_QUERY_KEYS = {
     "access_token",
     "api_key",
@@ -52,6 +55,7 @@ SENSITIVE_QUERY_KEYS = {
     "password",
     "token",
 }
+"""Set of query parameter keys considered sensitive and requiring redaction."""
 
 
 def normalize_distribution_name(name: str) -> str:
@@ -224,10 +228,13 @@ _ARG_RE = re.compile(
     r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^ \t#]+))?\s*$",
     re.IGNORECASE,
 )
+"""Regex to match Dockerfile ARG instructions."""
+
 _FROM_RE = re.compile(
     r"^\s*FROM(?:\s+--platform=\S+)?\s+(\S+)(?:\s+AS\s+\S+)?\s*$",
     re.IGNORECASE,
 )
+"""Regex to match Dockerfile FROM instructions."""
 
 
 def _strip_unquoted_comment(line: str) -> str:
@@ -287,7 +294,14 @@ def get_base_image_from_dockerfile(repo_root: Path, dockerfile_path: str) -> str
 
     # Substitute ${VAR} with args
     def repl(m: re.Match) -> str:
-        """Resolve one ``${VAR}`` token using collected ARG defaults."""
+        """Resolve one ``${VAR}`` token using collected ARG defaults.
+
+        Args:
+            m: Regex match object for the variable placeholder.
+
+        Returns:
+            The resolved variable value or the original placeholder if not found.
+        """
         var = m.group(1)
         return args.get(var, m.group(0))
 

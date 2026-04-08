@@ -719,6 +719,194 @@ def run_pip_command(
     raise last_error
 
 
+def _resolve_index_url(index_url: str | None) -> str | None:
+    """Resolve the index URL, falling back to system pip config if needed."""
+    use_system_index = index_url is None or (
+        isinstance(index_url, str) and not index_url.strip()
+    )
+    if use_system_index:
+        resolved_url = get_system_index_url()
+        if resolved_url:
+            print(f"  Using system pip index: {redact_index_url(resolved_url)}")
+        else:
+            print("  Using system pip config (no explicit index URL found)")
+        return resolved_url
+    return index_url
+
+
+def _handle_dry_run(
+    index_url: str | None,
+    platform_groups: list[list[str]],
+    tmp_path: Path,
+    download_dir: Path,
+    resolve_cmd: list[str],
+) -> None:
+    """Print commands that would be executed during a dry run."""
+    print("  Would run: " + format_command_for_log(resolve_cmd))
+    for group in platform_groups:
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            "-r",
+            tmp_path / "req_all.txt",
+            "-d",
+            download_dir / f"group-{'-'.join(group)}",
+            "--no-deps",
+        ]
+        if index_url:
+            cmd.extend(["--index-url", index_url])
+        for p in group:
+            cmd.extend(["--platform", p])
+        print("  Would run: " + format_command_for_log(cmd))
+
+
+def download_for_group(
+    group_index: int,
+    group: list[str],
+    download_dir: Path,
+    req_all: Path,
+    index_url: str | None,
+) -> tuple[list[str], Path]:
+    """Download resolved artifacts for a single platform group.
+
+    Args:
+        group_index: Numeric index used for deterministic temp directory.
+        group: Platform tags for this download pass.
+        download_dir: Base directory for downloads.
+        req_all: Path to requirements file.
+        index_url: Optional index URL.
+
+    Returns:
+        The input platform group and its download directory path.
+    """
+    group_name = ",".join(group)
+    group_dir = download_dir / f"group-{group_index}"
+    group_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "-r",
+        req_all,
+        "-d",
+        group_dir,
+        "--no-deps",
+    ]
+    if index_url:
+        cmd.extend(["--index-url", index_url])
+    for p in group:
+        cmd.extend(["--platform", p])
+    print(f"  Phase 2: Downloading for {group_name} ...")
+    run_pip_command(
+        cmd,
+        timeout=480,
+        phase_name="Phase 2",
+        context=f"platforms={group_name}",
+        attempts=2,
+        retry_backoff_sec=10,
+    )
+    return group, group_dir
+
+
+def _download_and_hash_groups(
+    platform_groups: list[list[str]],
+    download_dir: Path,
+    req_all: Path,
+    index_url: str | None,
+    hash_cache: dict[str, str],
+) -> tuple[dict[tuple[str, str], list[str]], bool]:
+    """Download artifacts for all platform groups and collect hashes."""
+    hashes_by_package_sets: dict[tuple[str, str], set[str]] = {}
+    max_workers = max(1, min(len(platform_groups), os.cpu_count() or 1))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    cancelled_early = False
+    try:
+        futures = {
+            executor.submit(
+                download_for_group, idx, group, download_dir, req_all, index_url
+            ): group
+            for idx, group in enumerate(platform_groups)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            group = futures[future]
+            try:
+                _, group_dir = future.result()
+            except RuntimeError as e:
+                print(f"  {e}", file=sys.stderr)
+                print(f"  Phase 2 failed for {group}", file=sys.stderr)
+                executor.shutdown(wait=False, cancel_futures=True)
+                cancelled_early = True
+                return {}, True
+            group_hashes = collect_hashes_from_download_dir(group_dir, hash_cache)
+            for pkg, hashes in group_hashes.items():
+                hashes_by_package_sets.setdefault(pkg, set()).update(hashes)
+    finally:
+        if not cancelled_early:
+            executor.shutdown(wait=True)
+
+    hashes_by_package = {
+        key: sorted(values) for key, values in hashes_by_package_sets.items()
+    }
+    return hashes_by_package, False
+
+
+def _order_resolved_packages(
+    root_names: list[str], resolved: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """Order resolved packages with root packages first, then alphabetically."""
+    resolved_by_norm: dict[str, tuple[str, str]] = {
+        normalize_distribution_name(n): (n, v) for n, v in resolved
+    }
+    seen: set[tuple[str, str]] = set()
+    ordered: list[tuple[str, str]] = []
+    for root_name in root_names:
+        nv = resolved_by_norm.get(normalize_distribution_name(root_name))
+        if nv and (normalize_distribution_name(nv[0]), nv[1]) not in seen:
+            seen.add((normalize_distribution_name(nv[0]), nv[1]))
+            ordered.append(nv)
+    remaining: list[tuple[str, str]] = []
+    for n, v in resolved:
+        key = (normalize_distribution_name(n), v)
+        if key not in seen:
+            seen.add(key)
+            remaining.append((n, v))
+    ordered.extend(
+        sorted(
+            remaining, key=lambda item: (normalize_distribution_name(item[0]), item[1])
+        )
+    )
+    return ordered
+
+
+def _format_requirements_lines(
+    index_url: str | None,
+    ordered: list[tuple[str, str]],
+    hashes_by_package: dict[tuple[str, str], list[str]],
+) -> tuple[list[str], list[str]]:
+    """Format the requirements lines and identify missing hashes."""
+    lines: list[str] = []
+    if index_url:
+        lines.append(f"--index-url={redact_index_url(index_url)}")
+        lines.append("")
+    missing_hashes: list[str] = []
+    for name, version in ordered:
+        key = (normalize_distribution_name(name), version)
+        hashes_list = hashes_by_package.get(key)
+        if not hashes_list:
+            missing_hashes.append(f"{name}=={version}")
+            continue
+        line0 = f"{name}=={version} \\"
+        lines.append(line0)
+        for i, h in enumerate(hashes_list):
+            suffix = " \\" if i < len(hashes_list) - 1 else ""
+            lines.append(f"    --hash=sha256:{h}{suffix}")
+        lines.append("")
+    return lines, missing_hashes
+
+
 def generate_for_index(
     index_url: str | None,
     root_names: list[str],
@@ -747,15 +935,7 @@ def generate_for_index(
         print(f"Error: {pip_msg}", file=sys.stderr)
         return 1
 
-    use_system_index = index_url is None or (
-        isinstance(index_url, str) and not index_url.strip()
-    )
-    if use_system_index:
-        index_url = get_system_index_url()
-        if index_url:
-            print(f"  Using system pip index: {redact_index_url(index_url)}")
-        else:
-            print("  Using system pip config (no explicit index URL found)")
+    index_url = _resolve_index_url(index_url)
 
     with tempfile.TemporaryDirectory(prefix="mlserver-req-") as tmp:
         resolve_dir = Path(tmp) / "resolve"
@@ -786,24 +966,9 @@ def generate_for_index(
         if index_url:
             resolve_cmd.extend(["--index-url", index_url])
         if dry_run:
-            print("  Would run: " + format_command_for_log(resolve_cmd))
-            for group in platform_groups:
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "download",
-                    "-r",
-                    Path(tmp) / "req_all.txt",
-                    "-d",
-                    download_dir / f"group-{'-'.join(group)}",
-                    "--no-deps",
-                ]
-                if index_url:
-                    cmd.extend(["--index-url", index_url])
-                for p in group:
-                    cmd.extend(["--platform", p])
-                print("  Would run: " + format_command_for_log(cmd))
+            _handle_dry_run(
+                index_url, platform_groups, Path(tmp), download_dir, resolve_cmd
+            )
             return 0
         try:
             run_pip_command(
@@ -831,116 +996,16 @@ def generate_for_index(
         req_all = Path(tmp) / "req_all.txt"
         req_all.write_text("\n".join(req_all_lines) + "\n")
 
-        def download_for_group(
-            group_index: int, group: list[str]
-        ) -> tuple[list[str], Path]:
-            """Download resolved artifacts for a single platform group.
-
-            Args:
-                group_index: Numeric index used for deterministic temp directory.
-                group: Platform tags for this download pass.
-
-            Returns:
-                The input platform group and its download directory path.
-            """
-            group_name = ",".join(group)
-            group_dir = download_dir / f"group-{group_index}"
-            group_dir.mkdir(parents=True, exist_ok=True)
-            cmd = [
-                sys.executable,
-                "-m",
-                "pip",
-                "download",
-                "-r",
-                req_all,
-                "-d",
-                group_dir,
-                "--no-deps",
-            ]
-            if index_url:
-                cmd.extend(["--index-url", index_url])
-            for p in group:
-                cmd.extend(["--platform", p])
-            print(f"  Phase 2: Downloading for {group_name} ...")
-            run_pip_command(
-                cmd,
-                timeout=480,
-                phase_name="Phase 2",
-                context=f"platforms={group_name}",
-                attempts=2,
-                retry_backoff_sec=10,
-            )
-            return group, group_dir
-
-        hashes_by_package_sets: dict[tuple[str, str], set[str]] = {}
-        max_workers = max(1, min(len(platform_groups), os.cpu_count() or 1))
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-        cancelled_early = False
-        try:
-            futures = {
-                executor.submit(download_for_group, idx, group): group
-                for idx, group in enumerate(platform_groups)
-            }
-            for future in concurrent.futures.as_completed(futures):
-                group = futures[future]
-                try:
-                    _, group_dir = future.result()
-                except RuntimeError as e:
-                    print(f"  {e}", file=sys.stderr)
-                    print(f"  Phase 2 failed for {group}", file=sys.stderr)
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    cancelled_early = True
-                    return 1
-                group_hashes = collect_hashes_from_download_dir(group_dir, hash_cache)
-                for pkg, hashes in group_hashes.items():
-                    hashes_by_package_sets.setdefault(pkg, set()).update(hashes)
-        finally:
-            if not cancelled_early:
-                executor.shutdown(wait=True)
-
-        hashes_by_package = {
-            key: sorted(values) for key, values in hashes_by_package_sets.items()
-        }
-
-    resolved_by_norm: dict[str, tuple[str, str]] = {
-        normalize_distribution_name(n): (n, v) for n, v in resolved
-    }
-    seen: set[tuple[str, str]] = set()
-    ordered: list[tuple[str, str]] = []
-    for root_name in root_names:
-        nv = resolved_by_norm.get(normalize_distribution_name(root_name))
-        if nv and (normalize_distribution_name(nv[0]), nv[1]) not in seen:
-            seen.add((normalize_distribution_name(nv[0]), nv[1]))
-            ordered.append(nv)
-    remaining: list[tuple[str, str]] = []
-    for n, v in resolved:
-        key = (normalize_distribution_name(n), v)
-        if key not in seen:
-            seen.add(key)
-            remaining.append((n, v))
-    ordered.extend(
-        sorted(
-            remaining, key=lambda item: (normalize_distribution_name(item[0]), item[1])
+        hashes_by_package, failed = _download_and_hash_groups(
+            platform_groups, download_dir, req_all, index_url, hash_cache
         )
-    )
+        if failed:
+            return 1
 
-    lines: list[str] = []
-    if index_url:
-        lines.append(f"--index-url={redact_index_url(index_url)}")
-        lines.append("")
-    missing_hashes: list[str] = []
-    for name, version in ordered:
-        key = (normalize_distribution_name(name), version)
-        hashes_list = hashes_by_package.get(key)
-        if not hashes_list:
-            missing_hashes.append(f"{name}=={version}")
-            continue
-        line0 = f"{name}=={version} \\"
-        lines.append(line0)
-        for i, h in enumerate(hashes_list):
-            suffix = " \\" if i < len(hashes_list) - 1 else ""
-            lines.append(f"    --hash=sha256:{h}{suffix}")
-        lines.append("")
+    ordered = _order_resolved_packages(root_names, resolved)
+    lines, missing_hashes = _format_requirements_lines(
+        index_url, ordered, hashes_by_package
+    )
 
     if missing_hashes:
         print(

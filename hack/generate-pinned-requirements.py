@@ -558,6 +558,114 @@ def _pip_supports_report(min_major: int = 22, min_minor: int = 2) -> tuple[bool,
     return True, output
 
 
+def _run_pip_attempt(
+    cmd_args: list[str],
+    timeout: int,
+    phase_name: str,
+    where: str,
+    attempt_prefix: str,
+    out_lines: list[str],
+) -> int:
+    """Run a single pip command attempt.
+
+    Args:
+        cmd_args: Command tokens to execute.
+        timeout: Per-attempt timeout in seconds.
+        phase_name: Label used in log/error messages.
+        where: Context suffix for logs.
+        attempt_prefix: Prefix for log lines.
+        out_lines: List to accumulate stdout lines.
+
+    Returns:
+        The process return code.
+
+    Raises:
+        subprocess.TimeoutExpired: If the process times out.
+    """
+    with subprocess.Popen(
+        cmd_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+    ) as proc:
+        assert proc.stdout is not None
+        line_queue: queue.Queue[str | None] = queue.Queue()
+        stdout_stream = proc.stdout
+
+        def _reader() -> None:
+            """Push subprocess stdout lines into a thread-safe queue."""
+            try:
+                for line in stdout_stream:
+                    line_queue.put(line)
+            finally:
+                line_queue.put(None)
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
+        deadline = time.monotonic() + timeout
+        timed_out = False
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                print(
+                    f"  {phase_name}{where}: timeout reached ({timeout}s), "
+                    "sending SIGKILL to pip process.",
+                    file=sys.stderr,
+                )
+                proc.kill()
+                break
+            try:
+                item = line_queue.get(timeout=min(0.5, max(0.01, remaining)))
+            except queue.Empty:
+                if proc.poll() is not None and not reader_thread.is_alive():
+                    break
+                continue
+
+            if item is None:
+                if proc.poll() is not None:
+                    break
+                continue
+
+            out_lines.append(item)
+            print(f"    {attempt_prefix} {sanitize_log_line(item.rstrip())}")
+
+        # Drain any remaining buffered output after process exit/kill.
+        while True:
+            try:
+                leftover = line_queue.get_nowait()
+            except queue.Empty:
+                break
+            if leftover is None:
+                continue
+            out_lines.append(leftover)
+            print(
+                f"    {attempt_prefix} {sanitize_log_line(leftover.rstrip())}"
+            )
+
+        if timed_out:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print(
+                    f"  {phase_name}{where}: process did not exit after "
+                    "SIGKILL; retrying SIGKILL before surfacing timeout.",
+                    file=sys.stderr,
+                )
+                proc.kill()
+                proc.wait(timeout=5)
+            raise subprocess.TimeoutExpired(cmd=cmd_args, timeout=timeout)
+
+        if proc.poll() is None:
+            return proc.wait(timeout=5)
+        else:
+            return proc.returncode
+
+
 def run_pip_command(
     cmd: list[object],
     timeout: int,
@@ -599,88 +707,14 @@ def run_pip_command(
             f"{prefix} [attempt {attempt}/{attempts}]" if attempts > 1 else prefix
         )
         try:
-            with subprocess.Popen(
-                cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                bufsize=1,
-            ) as proc:
-                assert proc.stdout is not None
-                line_queue: queue.Queue[str | None] = queue.Queue()
-                stdout_stream = proc.stdout
-
-                def _reader() -> None:
-                    """Push subprocess stdout lines into a thread-safe queue."""
-                    try:
-                        for line in stdout_stream:
-                            line_queue.put(line)
-                    finally:
-                        line_queue.put(None)
-
-                reader_thread = threading.Thread(target=_reader, daemon=True)
-                reader_thread.start()
-
-                deadline = time.monotonic() + timeout
-                timed_out = False
-
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        timed_out = True
-                        print(
-                            f"  {phase_name}{where}: timeout reached ({timeout}s), "
-                            "sending SIGKILL to pip process.",
-                            file=sys.stderr,
-                        )
-                        proc.kill()
-                        break
-                    try:
-                        item = line_queue.get(timeout=min(0.5, max(0.01, remaining)))
-                    except queue.Empty:
-                        if proc.poll() is not None and not reader_thread.is_alive():
-                            break
-                        continue
-
-                    if item is None:
-                        if proc.poll() is not None:
-                            break
-                        continue
-
-                    out_lines.append(item)
-                    print(f"    {attempt_prefix} {sanitize_log_line(item.rstrip())}")
-
-                # Drain any remaining buffered output after process exit/kill.
-                while True:
-                    try:
-                        leftover = line_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                    if leftover is None:
-                        continue
-                    out_lines.append(leftover)
-                    print(
-                        f"    {attempt_prefix} {sanitize_log_line(leftover.rstrip())}"
-                    )
-
-                if timed_out:
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        print(
-                            f"  {phase_name}{where}: process did not exit after "
-                            "SIGKILL; retrying SIGKILL before surfacing timeout.",
-                            file=sys.stderr,
-                        )
-                        proc.kill()
-                        proc.wait(timeout=5)
-                    raise subprocess.TimeoutExpired(cmd=cmd_args, timeout=timeout)
-
-                if proc.poll() is None:
-                    return_code = proc.wait(timeout=5)
-                else:
-                    return_code = proc.returncode
+            return_code = _run_pip_attempt(
+                cmd_args=cmd_args,
+                timeout=timeout,
+                phase_name=phase_name,
+                where=where,
+                attempt_prefix=attempt_prefix,
+                out_lines=out_lines,
+            )
         except subprocess.TimeoutExpired:
             stdout_tail = ("".join(out_lines).strip())[-800:]
             last_error = RuntimeError(

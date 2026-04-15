@@ -73,15 +73,21 @@ class SingleModelRegistry:
     def __init__(
         self,
         model_settings: ModelSettings,
-        on_model_load: List[ModelRegistryHook] = [],
-        on_model_reload: List[ModelReloadHook] = [],
-        on_model_unload: List[ModelRegistryHook] = [],
+        on_model_load: Optional[List[ModelRegistryHook]] = None,
+        on_model_reload: Optional[List[ModelReloadHook]] = None,
+        on_model_unload: Optional[List[ModelRegistryHook]] = None,
         model_initialiser: ModelInitialiser = model_initialiser,
     ):
         self._versions: Dict[str, MLModel] = {}
         self._default: Optional[MLModel] = None
 
         self._name = model_settings.name
+        if on_model_load is None:
+            on_model_load = list()
+        if on_model_reload is None:
+            on_model_reload = list()
+        if on_model_unload is None:
+            on_model_unload = list()
         self._on_model_load = on_model_load
         self._on_model_reload = on_model_reload
         self._on_model_unload = on_model_unload
@@ -287,12 +293,18 @@ class MultiModelRegistry:
 
     def __init__(
         self,
-        on_model_load: List[ModelRegistryHook] = [],
-        on_model_reload: List[ModelReloadHook] = [],
-        on_model_unload: List[ModelRegistryHook] = [],
+        on_model_load: Optional[List[ModelRegistryHook]] = None,
+        on_model_reload: Optional[List[ModelReloadHook]] = None,
+        on_model_unload: Optional[List[ModelRegistryHook]] = None,
         model_initialiser: ModelInitialiser = model_initialiser,
     ):
         self._models: Dict[str, SingleModelRegistry] = {}
+        if on_model_load is None:
+            on_model_load = list()
+        if on_model_reload is None:
+            on_model_reload = list()
+        if on_model_unload is None:
+            on_model_unload = list()
         self._on_model_load = on_model_load
         self._on_model_reload = on_model_reload
         self._on_model_unload = on_model_unload

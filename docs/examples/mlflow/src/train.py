@@ -33,7 +33,16 @@ def eval_metrics(actual, pred):
     return rmse, mae, r2
 
 
-if __name__ == "__main__":
+def main(alpha=0.5, l1_ratio=0.5):
+    """Main training function for ElasticNet wine quality model.
+    
+    Args:
+        alpha: ElasticNet mixing parameter (default: 0.5)
+        l1_ratio: ElasticNet L1 ratio parameter (default: 0.5)
+    
+    Returns:
+        None
+    """
     warnings.filterwarnings("ignore")
     np.random.seed(40)
 
@@ -50,6 +59,7 @@ if __name__ == "__main__":
             "check your internet connection. Error: %s",
             e,
         )
+        return
 
     # Split the data into training and test sets. (0.75, 0.25) split.
     train, test = train_test_split(data)
@@ -59,9 +69,6 @@ if __name__ == "__main__":
     test_x = test.drop(["quality"], axis=1)
     train_y = train[["quality"]]
     test_y = test[["quality"]]
-
-    alpha = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
-    l1_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
 
     with mlflow.start_run():
         lr = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
@@ -100,3 +107,9 @@ if __name__ == "__main__":
             )
         else:
             mlflow.sklearn.log_model(lr, "model", signature=model_signature)
+
+
+if __name__ == "__main__":
+    alpha = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
+    l1_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
+    main(alpha=alpha, l1_ratio=l1_ratio)

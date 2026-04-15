@@ -1,3 +1,4 @@
+import logging
 import pytest
 import asyncio
 import json
@@ -11,6 +12,8 @@ from mlserver.registry import MultiModelRegistry, SingleModelRegistry, model_ini
 from mlserver.settings import ModelSettings, ModelParameters
 
 from .fixtures import ErrorModel, SlowModel
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -243,7 +246,7 @@ async def test_model_not_ready(model_registry: MultiModelRegistry):
     try:
         await load_task
     except CancelledError:
-        pass
+        logger.exception("Failed to cancel load task for slow model")
 
 
 async def test_model_load_error(model_registry: MultiModelRegistry):
@@ -282,7 +285,7 @@ async def test_rolling_reload(
     try:
         await reload_task
     except CancelledError:
-        pass
+        logger.exception("Failed to cancel reload task for slow model")
 
 
 def test_model_initialiser_wraps_runtime_allowlist_value_error():

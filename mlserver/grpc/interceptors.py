@@ -69,6 +69,32 @@ class PromServerInterceptor(ServerInterceptor):
         """
         grpc_service_name, grpc_method_name, _ = method_call
 
+        if request_streaming and response_streaming:
+            return self._create_streaming_behavior(
+                grpc_service_name,
+                grpc_method_name,
+                behavior,
+                request_streaming,
+                response_streaming,
+            )
+
+        return self._create_unary_behavior(
+            grpc_service_name,
+            grpc_method_name,
+            behavior,
+            request_streaming,
+            response_streaming,
+        )
+
+    def _create_unary_behavior(
+        self,
+        grpc_service_name: str,
+        grpc_method_name: str,
+        behavior: RpcMethodHandler,
+        request_streaming: bool,
+        response_streaming: bool,
+    ):
+        """Create behavior handler for unary requests."""
         async def new_behavior(
             request: pb.ModelMetadataRequest, servicer_context: ServicerContext
         ) -> Optional[pb.ModelMetadataRequest]:
@@ -143,6 +169,17 @@ class PromServerInterceptor(ServerInterceptor):
                     return await behavior(request, servicer_context)
                 raise e
 
+        return new_behavior
+
+    def _create_streaming_behavior(
+        self,
+        grpc_service_name: str,
+        grpc_method_name: str,
+        behavior: RpcMethodHandler,
+        request_streaming: bool,
+        response_streaming: bool,
+    ):
+        """Create behavior handler for streaming requests."""
         async def new_behavior_stream(
             request_async_iterator: AsyncIterator[pb.ModelInferRequest],
             servicer_context: ServicerContext,
@@ -199,10 +236,7 @@ class PromServerInterceptor(ServerInterceptor):
                             yield item
                 raise e
 
-        if request_streaming and response_streaming:
-            return new_behavior_stream
-
-        return new_behavior
+        return new_behavior_stream
 
     def _compute_status_code(self, servicer_context: ServicerContext) -> StatusCode:
         """

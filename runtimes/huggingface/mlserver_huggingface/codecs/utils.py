@@ -123,24 +123,50 @@ class EqualUtil:
 
     @staticmethod
     def list_equal(list1: List[Any], list2: List[Any]) -> bool:
+        """
+        Performs deep equality comparison for heterogeneous lists containing nested structures.
+        
+        Implements a type-dispatched recursive algorithm to handle special types (PIL Images,
+        numpy arrays) that require custom comparison logic beyond Python's default equality.
+        Note: Does not detect circular references - infinite recursion possible with cycles.
+        Time complexity: O(n*m) where n is total elements and m is average comparison cost.
+        """
+        # Early termination optimization: length mismatch is cheapest failure condition
+        # Avoids unnecessary element-by-element comparison for obviously unequal lists
         if len(list1) != len(list2):
             return False
+        
+        # Type-dispatched element comparison: different types need specialized equality checks
+        # Standard == operator insufficient for Images (need pixel comparison) and nested structures
         for idx, el in enumerate(list1):
+            # Recursive dictionary comparison - may consume significant stack for deeply nested dicts
+            # No cycle detection: circular references will cause RecursionError
             if isinstance(el, dict):
                 if not EqualUtil.dict_equal(el, list2[idx]):
                     return False
+            # Recursive list comparison - enables deep equality for arbitrarily nested list structures
+            # Warning: No maximum recursion depth check - stack overflow risk with deep nesting
             elif isinstance(el, list):
                 if not EqualUtil.list_equal(el, list2[idx]):
                     return False
+            # PIL Image comparison using pixel-level diff - object identity/reference equality insufficient
+            # ImageChops.difference performs pixel-by-pixel comparison which is memory-intensive for large images
             elif isinstance(el, Image.Image):
                 if not EqualUtil.pil_equal(el, list2[idx]):
                     return False
+            # NumPy array comparison with element-wise equality - handles array broadcasting semantics
+            # np.array_equal loads both arrays into memory, potential issue for large arrays
             elif isinstance(el, np.ndarray):
                 if not np.array_equal(el, list2[idx]):
                     return False
+            # Fallback to Python's default equality for primitives (int, str, float, bool, None, etc.)
+            # Uses __eq__ protocol: may invoke custom equality for user-defined types
             else:
                 if el != list2[idx]:
                     return False
+        
+        # All element comparisons succeeded - lists are deeply equal
+        # Return True only after validating every element pair
         return True
 
     @staticmethod

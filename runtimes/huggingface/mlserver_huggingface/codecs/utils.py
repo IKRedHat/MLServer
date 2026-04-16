@@ -123,24 +123,51 @@ class EqualUtil:
 
     @staticmethod
     def list_equal(list1: List[Any], list2: List[Any]) -> bool:
+        """
+        Deep equality comparison for heterogeneous lists containing complex types.
+        
+        This function implements a structural equality algorithm that handles nested data structures,
+        specialized ML types (PIL Images, numpy arrays), and arbitrary Python objects. The algorithm
+        uses type dispatch to select appropriate comparison methods, with O(n) time complexity where
+        n is the total number of elements across all nesting levels. Note: does not detect circular
+        references, which could cause infinite recursion in pathological cases.
+        """
+        # Early termination optimization: length mismatch is the most common case for inequality
+        # and can be checked in O(1) time, avoiding unnecessary element-by-element comparison
         if len(list1) != len(list2):
             return False
+        
+        # Element-by-element structural comparison using type dispatch pattern
+        # Type checking is required because standard equality operators don't provide correct
+        # semantics for PIL Images (would compare object identity) or deep nested structures
         for idx, el in enumerate(list1):
+            # Recursive descent for nested dictionaries - may consume stack space proportional
+            # to nesting depth; extremely deep structures could theoretically cause stack overflow
             if isinstance(el, dict):
                 if not EqualUtil.dict_equal(el, list2[idx]):
                     return False
+            # Recursive descent for nested lists - note absence of cycle detection means
+            # circular references will cause infinite recursion and stack overflow
             elif isinstance(el, list):
                 if not EqualUtil.list_equal(el, list2[idx]):
                     return False
+            # PIL Image objects require pixel-level comparison via ImageChops rather than
+            # object identity; this ensures semantic equality for images with identical content
             elif isinstance(el, Image.Image):
                 if not EqualUtil.pil_equal(el, list2[idx]):
                     return False
+            # NumPy arrays use element-wise comparison; np.array_equal handles broadcasting
+            # and properly compares arrays with different shapes or dtypes (returns False)
             elif isinstance(el, np.ndarray):
                 if not np.array_equal(el, list2[idx]):
                     return False
+            # Fallback to standard equality operator for primitive types (int, str, float, etc.)
+            # This relies on __eq__ implementation; custom objects may override for domain logic
             else:
                 if el != list2[idx]:
                     return False
+        
+        # All positional elements matched via appropriate equality semantics - lists are structurally equal
         return True
 
     @staticmethod

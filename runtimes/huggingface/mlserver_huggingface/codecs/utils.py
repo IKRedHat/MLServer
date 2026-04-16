@@ -123,25 +123,31 @@ class EqualUtil:
 
     @staticmethod
     def list_equal(list1: List[Any], list2: List[Any]) -> bool:
-        if len(list1) != len(list2):
+        """Deep equality checker for heterogeneous lists with ML pipeline data types.
+        
+        Handles nested structures (dicts/lists), PIL Images, and numpy arrays using
+        type-specific comparison to avoid false negatives from object identity checks
+        or numpy broadcasting behavior. Recursively compares nested elements.
+        """
+        if len(list1) != len(list2):  # O(1) length check for early exit
             return False
-        for idx, el in enumerate(list1):
+        for idx, el in enumerate(list1):  # Type-dispatch pattern for heterogeneous comparison
             if isinstance(el, dict):
-                if not EqualUtil.dict_equal(el, list2[idx]):
+                if not EqualUtil.dict_equal(el, list2[idx]):  # Recurse into nested dicts
                     return False
             elif isinstance(el, list):
-                if not EqualUtil.list_equal(el, list2[idx]):
+                if not EqualUtil.list_equal(el, list2[idx]):  # Recurse into nested lists
                     return False
             elif isinstance(el, Image.Image):
-                if not EqualUtil.pil_equal(el, list2[idx]):
+                if not EqualUtil.pil_equal(el, list2[idx]):  # Pixel-based comparison (not object identity)
                     return False
             elif isinstance(el, np.ndarray):
-                if not np.array_equal(el, list2[idx]):
+                if not np.array_equal(el, list2[idx]):  # Avoid ndarray.__eq__ returning bool array
                     return False
             else:
-                if el != list2[idx]:
+                if el != list2[idx]:  # Fallback to default __eq__ for primitives
                     return False
-        return True
+        return True  # All elements passed their respective equality checks
 
     @staticmethod
     def dict_equal(dict1: Dict[Any, Any], dict2: Dict[Any, Any]) -> bool:

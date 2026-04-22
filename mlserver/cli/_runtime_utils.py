@@ -13,6 +13,28 @@ DOCKER_GLOB_METACHARACTERS = frozenset("*?[]")
 RUNTIME_IMPORT_PATH_EXPECTED_FORMAT_CLASSNAME = "Expected format: module.ClassName"
 RUNTIME_IMPORT_PATH_EXPECTED_FORMAT_DOTTED = "Expected a dotted Python import path."
 
+__all__ = [
+    "RuntimePathValidationError",
+    "MissingRuntimeSourcePathsError",
+    "UndeclaredRuntimeSourcePathsError",
+    "MissingNestedRuntimePackagesError",
+    "RuntimePathsRequireAllowlistError",
+    "canonicalize_runtime_import_paths",
+    "normalise_runtime_import_paths",
+    "load_model_settings_json",
+    "collect_runtime_declaration_issues",
+    "format_invalid_runtime_implementations_error",
+    "format_missing_runtime_declarations_error",
+    "validate_module_name",
+    "validate_runtime_path_syntax",
+    "check_destination_collision",
+    "validate_module_coverage",
+    "validate_nested_runtime_package_coverage",
+    "calculate_runtime_requirements",
+    "validate_runtime_path_preconditions",
+    "normalise_runtime_source_paths",
+]
+
 
 class RuntimePathValidationError(ValueError):
     """Base exception for runtime path validation failures."""

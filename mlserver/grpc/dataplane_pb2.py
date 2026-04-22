@@ -66,6 +66,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_REPOSITORYMODELUNLOADREQUEST_PARAMETERSENTRY"]._serialized_options = (
         b"8\001"
     )
+    # NOTE: Numeric literals below (e.g., 1129, 1053) are auto-generated protobuf serialization offsets.
+    # These values are computed by the protocol buffer compiler and should not be manually modified.
     _globals["_SERVERLIVEREQUEST"]._serialized_start = 30
     _globals["_SERVERLIVEREQUEST"]._serialized_end = 49
     _globals["_SERVERLIVERESPONSE"]._serialized_start = 51

@@ -154,7 +154,15 @@ def custom_request_message(sum_model_settings: ModelSettings) -> ModelRequestMes
 
 @pytest.fixture
 def env_model_settings(development_mode, env_tarball: str) -> ModelSettings:
-    """Model settings with environment_tarball (requires DEVELOPMENT mode)."""
+    """Model settings with environment_tarball (requires DEVELOPMENT mode).
+
+    Args:
+        development_mode: Fixture that enables development mode.
+        env_tarball: Path to the environment tarball file.
+
+    Returns:
+        ModelSettings: Model settings configured with environment_tarball parameter.
+    """
     return ModelSettings(
         name="env-model",
         implementation=EnvModel,

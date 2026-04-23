@@ -123,21 +123,33 @@ class EqualUtil:
 
     @staticmethod
     def list_equal(list1: List[Any], list2: List[Any]) -> bool:
+        """
+        Perform deep equality comparison between two lists with support for complex
+        nested data types including PIL Images, numpy arrays, dictionaries, and nested lists.
+        """
+        # Early optimization: check if lists have different lengths to avoid unnecessary iteration
         if len(list1) != len(list2):
             return False
+        
+        # Iterate through each element and perform type-specific equality comparisons
         for idx, el in enumerate(list1):
+            # Recursive dictionary comparison - custom equality needed for nested dicts
             if isinstance(el, dict):
                 if not EqualUtil.dict_equal(el, list2[idx]):
                     return False
+            # Recursive list comparison for handling nested list structures
             elif isinstance(el, list):
                 if not EqualUtil.list_equal(el, list2[idx]):
                     return False
+            # PIL Image comparison - pixel-level comparison necessary instead of object equality
             elif isinstance(el, Image.Image):
                 if not EqualUtil.pil_equal(el, list2[idx]):
                     return False
+            # Numpy array comparison - use np.array_equal for element-wise comparison
             elif isinstance(el, np.ndarray):
                 if not np.array_equal(el, list2[idx]):
                     return False
+            # Fallback to standard equality comparison for primitive types and other objects
             else:
                 if el != list2[idx]:
                     return False

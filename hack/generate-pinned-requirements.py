@@ -170,9 +170,9 @@ def get_system_index_url() -> str | None:
             "  Warning: timed out reading pip global.index-url from pip config.",
             file=sys.stderr,
         )
-    except FileNotFoundError:
+    except (OSError, subprocess.CalledProcessError):
         print(
-            "  Warning: pip executable not found while reading pip config.",
+            "  Warning: failed to read pip global.index-url from pip config.",
             file=sys.stderr,
         )
     return None

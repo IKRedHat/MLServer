@@ -42,4 +42,8 @@ async def cancel_task(task: Task):
         task.cancel()
         await task
     except asyncio.CancelledError:
-        pass
+        logger.debug("Task cancelled successfully")
+    except Exception as e:
+        logger.exception(
+            f"Unexpected error during task cancellation: {e}"
+        )

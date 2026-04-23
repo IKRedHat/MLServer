@@ -3,6 +3,7 @@ import os
 import pytest
 import signal
 import sys
+import logging
 
 from aiohttp.client_exceptions import ClientResponseError
 from pathlib import Path
@@ -18,6 +19,9 @@ from ..utils import (
     get_available_ports,
 )
 from .test_start_cases import case_custom_module, case_sum_model
+
+
+logger = logging.getLogger(__name__)
 
 
 def _spawn_mlserver(folder: str) -> Popen:
@@ -45,20 +49,29 @@ def _spawn_mlserver(folder: str) -> Popen:
 def _stop_mlserver(process: Popen) -> None:
     try:
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-    except ProcessLookupError:
+    except ProcessLookupError as e:
         # Process may have already exited before fixture teardown runs.
-        pass
+        logger.warning(
+            f"Failed initial SIGTERM cleanup for process {process.pid}: "
+            f"Process not found (may have already exited). {e}"
+        )
     try:
         process.wait(timeout=10)
     except TimeoutExpired:
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        except ProcessLookupError as e:
+            logger.warning(
+                f"Failed SIGKILL cleanup for process {process.pid}: "
+                f"Process not found. {e}"
+            )
         try:
             process.wait(timeout=5)
-        except TimeoutExpired:
-            pass  # Give up; process is unkillable (zombie or kernel issue)
+        except TimeoutExpired as e:
+            logger.error(
+                f"Final timeout waiting for process {process.pid} to exit. "
+                f"Process may be unkillable (zombie or kernel issue). {e}"
+            )
 
 
 @pytest.fixture

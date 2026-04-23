@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 import json
+import logging
 
 from asyncio import CancelledError
 from typing import List, Union
@@ -243,7 +244,7 @@ async def test_model_not_ready(model_registry: MultiModelRegistry):
     try:
         await load_task
     except CancelledError:
-        pass
+        logging.exception("Load task was cancelled")
 
 
 async def test_model_load_error(model_registry: MultiModelRegistry):
@@ -282,7 +283,7 @@ async def test_rolling_reload(
     try:
         await reload_task
     except CancelledError:
-        pass
+        logging.exception("Reload task was cancelled")
 
 
 def test_model_initialiser_wraps_runtime_allowlist_value_error():

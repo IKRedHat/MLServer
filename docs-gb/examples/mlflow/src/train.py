@@ -27,6 +27,21 @@ logger = logging.getLogger(__name__)
 
 
 def eval_metrics(actual, pred):
+    """Evaluate regression model performance using multiple metrics.
+
+    Computes Root Mean Squared Error (RMSE), Mean Absolute Error (MAE),
+    and R-squared (R2) score to assess model prediction quality.
+
+    Args:
+        actual: Array-like of actual/true target values.
+        pred: Array-like of predicted target values.
+
+    Returns:
+        tuple: A tuple containing three float values:
+            - rmse (float): Root Mean Squared Error
+            - mae (float): Mean Absolute Error
+            - r2 (float): R-squared score
+    """
     rmse = np.sqrt(mean_squared_error(actual, pred))
     mae = mean_absolute_error(actual, pred)
     r2 = r2_score(actual, pred)

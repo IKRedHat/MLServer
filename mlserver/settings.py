@@ -53,6 +53,18 @@ logger = logging.getLogger(__name__)
 
 
 def is_valid_runtime_import_path(value: object) -> bool:
+    """Validate that a value is a valid runtime import path.
+
+    A valid runtime import path must be a dotted string (e.g., 'module.ClassName')
+    matching RUNTIME_IMPORT_PATH_PATTERN, with the final component (class name)
+    starting with an uppercase letter.
+
+    Args:
+        value: The value to validate as a runtime import path.
+
+    Returns:
+        True if value is a valid runtime import path, False otherwise.
+    """
     if not isinstance(value, str) or not RUNTIME_IMPORT_PATH_PATTERN.fullmatch(value):
         return False
     _, _, attr = value.rpartition(".")
@@ -184,7 +196,11 @@ def _extra_sys_path(extra_path: str):
         try:
             sys.path.remove(extra_path)
         except ValueError:
-            pass
+            logger.debug(
+                "Failed to remove temporary sys.path entry %r "
+                "(already removed or never added)",
+                extra_path,
+            )
 
 
 def _reload_module(import_path: str):
@@ -192,13 +208,53 @@ def _reload_module(import_path: str):
 
     This is used in development mode when loading runtimes from model folders
     to ensure we get the latest version of the module.
+
+    Args:
+        import_path: The runtime import path to reload (e.g., 'module.ClassName').
+                    Must be a valid runtime import path.
+
+    Raises:
+        ValueError: If import_path is not a valid runtime import path.
     """
     if not import_path:
         return
 
+    # Step 1: Validate import path before dynamic import to prevent code injection
+    # Ensures path contains only safe characters (alphanumeric, dots, underscores)
+    if not is_valid_runtime_import_path(import_path):
+        raise ValueError(
+            f"Invalid runtime import path: {import_path!r}. "
+            "Import path must match the pattern 'module.ClassName'."
+        )
+
     module_path, _, _ = import_path.rpartition(".")
-    module = importlib.import_module(module_path)
-    importlib.reload(module)
+    
+    # Step 2: Whitelist check for known safe runtime module prefixes
+    # Prefer known mlserver packages as additional security layer
+    safe_prefixes = ("mlserver.", "mlserver_")
+    if not module_path.startswith(safe_prefixes):
+        # Allow in development mode but log warning for non-standard modules
+        logger.warning(
+            "Loading custom runtime %r from non-mlserver package. "
+            "Ensure this module is from a trusted source.",
+            import_path
+        )
+    
+    # Step 3: Wrap import in try-catch to handle errors securely
+    # Prevents information disclosure through detailed error messages
+    try:
+        module = importlib.import_module(module_path)
+        importlib.reload(module)
+    except (ImportError, AttributeError, TypeError) as exc:
+        logger.error(
+            "Failed to reload module for runtime %s: %s",
+            import_path,
+            type(exc).__name__
+        )
+        raise ValueError(
+            f"Failed to reload module for runtime {import_path!r}. "
+            "Verify the module exists and is accessible."
+        ) from exc
 
 
 def _get_import_path(klass: Type):
@@ -251,12 +307,24 @@ def _load_image_baked_allowed_model_implementations(
 
 
 class BaseSettings(pydantic_settings.BaseSettings):
+    """Base configuration class for MLServer settings.
+
+    Extends Pydantic BaseSettings with enhanced attribute setting behavior
+    to support property setters, and provides default serialization methods
+    that use field aliases and exclude unset/none values.
+    """
+
     @no_type_check
     def __setattr__(self, name, value):
-        """
-        Patch __setattr__ to be able to use property setters.
-        From:
-            https://github.com/pydantic/pydantic/issues/1577#issuecomment-790506164
+        """Patch __setattr__ to enable property setters in Pydantic models.
+
+        This override allows Pydantic models to use property setters, which are
+        not supported by default. See:
+        github.com/pydantic/pydantic/issues/1577#issuecomment-790506164
+
+        Args:
+            name: The attribute name to set.
+            value: The value to assign to the attribute.
         """
         try:
             super().__setattr__(name, value)

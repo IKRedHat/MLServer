@@ -53,6 +53,37 @@ logger = logging.getLogger(__name__)
 
 
 def is_valid_runtime_import_path(value: object) -> bool:
+    """Validate that a value is a valid runtime import path.
+
+    A valid runtime import path must be a dotted string (e.g., 'module.ClassName')
+    matching RUNTIME_IMPORT_PATH_PATTERN, with the final component (class name)
+    starting with an uppercase letter. This function is used throughout the
+    codebase to prevent code injection attacks by ensuring runtime imports
+    follow a strict, predictable pattern.
+
+    The validation ensures:
+    1. Value is a string type
+    2. Matches the canonical dotted module pattern (e.g., 'module.submodule.ClassName')
+    3. No leading underscores in any segment (enforces explicit declarations)
+    4. Final component (class name) starts with uppercase letter
+
+    Args:
+        value: The value to validate as a runtime import path. Expected to be
+               a string in the format 'module.ClassName', but accepts any object
+               type and returns False for non-string inputs.
+
+    Returns:
+        True if value is a valid runtime import path matching all validation
+        criteria, False otherwise (including for non-string inputs).
+
+    Examples:
+        >>> is_valid_runtime_import_path('mlserver_sklearn.SKLearnModel')
+        True
+        >>> is_valid_runtime_import_path('invalid')
+        False
+        >>> is_valid_runtime_import_path('_private.Module')
+        False
+    """
     if not isinstance(value, str) or not RUNTIME_IMPORT_PATH_PATTERN.fullmatch(value):
         return False
     _, _, attr = value.rpartition(".")
@@ -184,7 +215,11 @@ def _extra_sys_path(extra_path: str):
         try:
             sys.path.remove(extra_path)
         except ValueError:
-            pass
+            logger.debug(
+                "Failed to remove temporary sys.path entry %r "
+                "(already removed or never added)",
+                extra_path,
+            )
 
 
 def _reload_module(import_path: str):
@@ -192,9 +227,32 @@ def _reload_module(import_path: str):
 
     This is used in development mode when loading runtimes from model folders
     to ensure we get the latest version of the module.
+
+    SECURITY: This function validates import_path before performing dynamic
+    import to prevent arbitrary code execution. Only runtime import paths
+    matching the canonical pattern (module.ClassName) are allowed.
+
+    Args:
+        import_path: The runtime import path to reload (e.g., 'module.ClassName').
+                    Must be a valid runtime import path matching the pattern
+                    enforced by is_valid_runtime_import_path().
+
+    Raises:
+        ValueError: If import_path is not a valid runtime import path, preventing
+                   potential code injection attacks.
     """
-    if not import_path:
+    # Early return for empty string (but validate type first)
+    if isinstance(import_path, str) and not import_path:
         return
+
+    # SECURITY: Validate import path before dynamic import to prevent code injection
+    # This check is critical - do not remove or bypass
+    if not is_valid_runtime_import_path(import_path):
+        raise ValueError(
+            f"Invalid runtime import path: {import_path!r}. "
+            "Import path must match the pattern 'module.ClassName'. "
+            "This validation prevents arbitrary code execution."
+        )
 
     module_path, _, _ = import_path.rpartition(".")
     module = importlib.import_module(module_path)
@@ -214,6 +272,22 @@ def _get_trusted_runtimes_artifact_path() -> str:
 def _load_image_baked_allowed_model_implementations(
     artifact_path: str,
 ) -> Optional[frozenset[str]]:
+    """Load trusted runtime allowlist from container image artifact file.
+
+    Returns None if artifact file doesn't exist (development mode), or a
+    frozenset of allowed runtime import paths if file exists (production mode).
+
+    Args:
+        artifact_path: Path to the trusted runtimes JSON artifact file.
+
+    Returns:
+        None if artifact file doesn't exist (enabling development mode), or
+        frozenset[str] of allowed runtime import paths if file exists.
+
+    Raises:
+        ValueError: If artifact exists but is invalid (not a file, malformed
+                   JSON, contains invalid import paths, etc.).
+    """
     if not os.path.lexists(artifact_path):
         return None
     if not os.path.isfile(artifact_path):
@@ -251,12 +325,50 @@ def _load_image_baked_allowed_model_implementations(
 
 
 class BaseSettings(pydantic_settings.BaseSettings):
+    """Base configuration class for MLServer settings.
+
+    Extends Pydantic BaseSettings with enhanced attribute setting behavior
+    to support property setters, and provides default serialization methods
+    that use field aliases and exclude unset/none values.
+
+    This class serves as the foundation for all MLServer configuration classes
+    (Settings, ModelSettings, ModelParameters, CORSSettings). It patches
+    Pydantic's default behavior to enable property setters and ensures
+    consistent serialization across the codebase.
+
+    Key enhancements over standard Pydantic BaseSettings:
+    - Property setter support via custom __setattr__ implementation
+    - Default dict() serialization uses field aliases
+    - Automatic exclusion of unset and None values in serialization
+    - Backward compatibility with Pydantic 1.x BaseSettings
+
+    Usage:
+        Inherit from this class instead of pydantic_settings.BaseSettings
+        to get enhanced behavior:
+
+        class MySettings(BaseSettings):
+            my_field: str = Field(alias="MY_FIELD")
+    """
+
     @no_type_check
     def __setattr__(self, name, value):
-        """
-        Patch __setattr__ to be able to use property setters.
-        From:
-            https://github.com/pydantic/pydantic/issues/1577#issuecomment-790506164
+        """Set attribute value, with support for property setters.
+
+        This override allows Pydantic models to use property setters, which are
+        not supported by default. When setting an attribute, this method first
+        attempts the standard Pydantic __setattr__. If that raises a ValueError
+        and the attribute is a property with a setter, it falls back to using
+        the property setter directly.
+
+        See: github.com/pydantic/pydantic/issues/1577#issuecomment-790506164
+
+        Args:
+            name: The attribute name to set.
+            value: The value to assign to the attribute.
+
+        Raises:
+            ValueError: If attribute cannot be set and no matching property
+                       setter exists.
         """
         try:
             super().__setattr__(name, value)
@@ -296,6 +408,20 @@ class BaseSettings(pydantic_settings.BaseSettings):
 
 
 class CORSSettings(BaseSettings):
+    """Cross-Origin Resource Sharing (CORS) configuration for MLServer.
+
+    Controls which origins can make cross-origin requests to the server,
+    along with allowed methods, headers, and other CORS-related settings.
+
+    Attributes:
+        allow_origins: List of origins permitted for cross-origin requests.
+        allow_origin_regex: Regex pattern matching allowed origins.
+        allow_credentials: Whether to support cookies for cross-origin requests.
+        allow_methods: HTTP methods allowed for cross-origin requests.
+        allow_headers: HTTP headers supported for cross-origin requests.
+        expose_headers: Response headers accessible to the browser.
+        max_age: Maximum cache time in seconds for CORS responses.
+    """
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_SETTINGS,
         env_prefix=ENV_PREFIX_SETTINGS,
@@ -338,6 +464,23 @@ class CORSSettings(BaseSettings):
 
 
 class Settings(BaseSettings):
+    """Server-wide configuration settings for MLServer.
+
+    Configures all aspects of MLServer operation including HTTP/gRPC servers,
+    model repository, parallel workers, metrics, logging, CORS, and security.
+    Settings can be loaded from environment variables (MLSERVER_* prefix) or
+    .env files.
+
+    Attributes:
+        debug: Enable debug mode.
+        parallel_workers: Number of workers for parallel inference.
+        host: Host address for server connections.
+        http_port: Port for HTTP/REST connections.
+        grpc_port: Port for gRPC connections.
+        metrics_endpoint: Endpoint path for Prometheus metrics.
+        model_repository_root: Root directory for model repository.
+        load_models_at_startup: Whether to load all models at startup.
+    """
     model_config = SettingsConfigDict(
         protected_namespaces=(),
         env_file=ENV_FILE_SETTINGS,
@@ -582,6 +725,22 @@ class ModelParameters(BaseSettings):
 
 
 class ModelSettings(BaseSettings):
+    """Configuration settings for individual ML models in MLServer.
+
+    Defines model-specific settings including the runtime implementation,
+    metadata, batching configuration, and model parameters. Settings can
+    be loaded from model-settings.json files or environment variables
+    (MLSERVER_MODEL_* prefix).
+
+    Attributes:
+        name: Name of the model.
+        implementation_: Runtime implementation import path.
+        platform: Framework used to train the model.
+        inputs: Metadata about model inputs.
+        outputs: Metadata about model outputs.
+        max_batch_size: Maximum batch size for adaptive batching.
+        parameters: Model-specific parameters.
+    """
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_SETTINGS,
         env_prefix=ENV_PREFIX_MODEL_SETTINGS,

@@ -1,52 +1,5 @@
 # Changelog
 
-## [Unreleased] (opendatahub-io fork)
-
-### Added
-- Engineering documentation suite: architecture, ADRs, onboarding, security, API reference, deployment, and FAQ (`docs/engineering/`)
-- Code comment coverage across core modules and runtime plugins (85%+ target)
-- ONNX CUDA GPU runtime support with tests and Dockerfile fixes (#218, #227)
-- ONNX runtime support (`mlserver_onnx`) (#73)
-- ppc64le platform support for requirements generation (#213)
-- Early-gate CI pipelines for fast pre-merge validation (#192)
-- `AGENTS.md` for repository contributor guidance (#197)
-- `log_level` setting decoupled from `debug`, propagated to runtimes (#212)
-- `access_log` setting for independent request logging control (#212)
-- Podman support for running tests (#43)
-- Renovate configuration for automated dependency updates
-- Slack notifications for PRs
-
-### Changed
-- Dropped Python 3.9 support; modernized to 3.10+ syntax (#142)
-- Refactored runtime dependency groups into ODH-shipped and test-only (#170)
-- Startup readiness logic fully encapsulated within `MultiModelRegistry` (#181)
-- Runtime allowlist made flexible to support both canonical and verbose import paths (#110)
-- Replaced Dockerfile.cuda.konflux references with Dockerfile.konflux.cuda naming
-- Single base image reference across all Dockerfiles (#113)
-- Hardened GitHub workflows against variable command injection (#163)
-- Hardened release-to-staging sync workflow merge and policy handling (#123, #126)
-
-### Fixed
-- Race condition on model load failure during server startup (#174)
-- Redundant `InferencePool` spawning for same `inference_pool_gid` (#143)
-- ONNX model loading failure with KServe Modelcar symlinks (#117)
-- XGBoost model loading issue with modelcar storage (#70)
-- CLI version normalization for custom runtime base image tags (#134)
-- Bug with `uvloop` >v0.21 compatibility
-- Bug with venv-packaged tarball files where no event loop is running on the worker
-
-### Security
-- CVE-2026-42561: Upgraded `python-multipart` to >= 0.0.27 (RHOAIENG-71848, #208)
-- CVE-2026-34993: Upgraded `aiohttp` to >= 3.14.0 (RHOAIENG-65968/66024, #205)
-- CVE-2026-44432, CVE-2026-44431: Upgraded `urllib3` to >= 2.7.0 (RHOAIENG-63912/64531, #199)
-- CVE-2026-48710: Upgraded `Starlette` to >= 1.0.1 and `FastAPI` to >= 0.134.0 (RHOAIENG-64894/64927, #185)
-
-### Removed
-- Conda environment references from Dockerfiles and test workflows (#6)
-- Unsupported runtimes from CI test matrix and container image
-- Python 3.9 compatibility code
-
----
 
 <a id="1.7.0"></a>
 ## [1.7.0](https://github.com/SeldonIO/MLServer/releases/tag/1.7.0) - 2025-04-11
